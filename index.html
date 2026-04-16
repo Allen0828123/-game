@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>偷偷梳貓咪小遊戲 - 進階版</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f4;
+            margin-top: 50px;
+            /* 隱藏超出畫面的掉毛，避免出現捲軸 */
+            overflow-x: hidden; 
+        }
+        #game-area {
+            position: relative;
+            display: inline-block;
+            user-select: none;
+            /* 這裡設定梳子游標，如果圖片失效會退回 auto (一般游標) */
+            /* 建議使用 32x32 像素以內的去背 png 圖片 */
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="10" rx="2" ry="2"></rect><path d="M6 9V5"></path><path d="M10 9V5"></path><path d="M14 9V5"></path><path d="M18 9V5"></path></svg>') 16 16, auto;
+        }
+        #cat-image {
+            width: 350px;
+            height: 450px;
+            object-fit: cover;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            background-color: #ddd;
+            transition: transform 0.1s; /* 讓點擊時有一點點震動感 */
+        }
+        #cat-image:active {
+            transform: scale(0.98); /* 點擊時圖片微縮 */
+        }
+        #score-board {
+            font-size: 60px;
+            position: absolute;
+            top: 10px;
+            left: 20px;
+            color: #333;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(255,255,255,0.8);
+            pointer-events: none; /* 讓點擊穿透文字，避免干擾梳毛 */
+        }
+        #status-message {
+            font-size: 28px;
+            color: #d9534f;
+            margin-top: 20px;
+            font-weight: bold;
+            height: 40px;
+        }
+        .instructions {
+            margin-top: 20px;
+            color: #555;
+            line-height: 1.6;
+            background: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        /* 掉毛特效的 CSS 動畫 */
+        .cat-hair {
+            position: absolute;
+            width: 12px;
+            height: 4px;
+            background-color: #d19a5a; /* 貓毛顏色 */
+            border-radius: 50%; /* 讓它看起來像橢圓形的毛髮 */
+            pointer-events: none; /* 防止干擾點擊 */
+            opacity: 0.9;
+            /* 執行 fall 動畫，持續 0.8 秒 */
+            animation: fall 0.8s ease-in forwards; 
+        }
+
+        @keyframes fall {
+            0% {
+                opacity: 0.9;
+                transform: translateY(0) rotate(0deg);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(80px) rotate(180deg); /* 往下掉並旋轉 */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-area">
+        <div id="score-board">0</div>
+        <img id="cat-image" src="" alt="貓咪">
+    </div>
+
+    <div id="status-message">準備好了嗎？開始梳毛！</div>
+
+    <div class="instructions">
+        <strong>🎮 進階版規則：</strong><br>
+        1. 瘋狂點擊圖片梳毛得分（有掉毛特效喔！）。<br>
+        2. 當貓咪<strong>「準備回頭」</strong>（第二階段）時，<strong>立刻停止點擊！</strong><br>
+        3. 如果在「準備回頭」時還點擊，貓咪就會徹底轉過來，遊戲結束。<br>
+        4. 如果你乖乖停手，貓咪覺得沒事，就會轉回去繼續讓你梳。
+    </div>
+
+    <script>
+        // ================= 圖片設定區 =================
+        // 1. 安全狀態 (可以瘋狂梳毛)
+        const imgSafe = 'https://i.ibb.co/Gfn4Mdcn/d77df90b-fd99-41f5-b02b-476c10f10367.jpg'; 
+        
+        // 2. 警戒狀態 (快被發現了，不能點擊！)
+        const imgWarning = 'https://i.ibb.co/spzfG9ZJ/71aa54d8-2c16-4941-a481-798625b4544a.jpg'; 
+        
+        // 3. 危險狀態 (被發現了，Game Over)
+        const imgDanger = 'https://i.ibb.co/1fCLdVGq/802e1617-454d-498c-83aa-a71cc10af682.jpg'; 
+        
+        // [可選] 梳子游標圖片的直接連結 (如果留空就會用預設的簡單黑色梳子圖示)
+        // const combImage = 'https://你的梳子圖片網址.png'; 
+        // ==============================================
+
+        let score = 0;
+        let gameState = 'SAFE'; // 遊戲狀態：SAFE (安全), WARNING (警戒), OVER (結束)
+        let mainTimer; // 控制自動轉換狀態的計時器
+
+        const catElement = document.getElementById('cat-image');
+        const scoreElement = document.getElementById('score-board');
+        const messageElement = document.getElementById('status-message');
+        const gameArea = document.getElementById('game-area');
+
+        // 如果你有自訂梳子圖片，把它套用到遊戲區
+        if (typeof combImage !== 'undefined' && combImage !== '') {
+            gameArea.style.cursor = `url('${combImage}') 16 16, auto`;
+        }
+
+        // 玩家點擊事件
+        gameArea.addEventListener('mousedown', function(e) {
+            if (gameState === 'OVER') return;
+
+            if (gameState === 'WARNING') {
+                // 在警戒狀態下點擊 ➔ 被發現了！
+                triggerGameOver();
+            } else if (gameState === 'SAFE') {
+                // 在安全狀態下點擊 ➔ 加分 + 掉毛
+                score++;
+                scoreElement.textContent = score;
+                messageElement.textContent = "梳梳梳...";
+                messageElement.style.color = "#5cb85c";
+                createHairEffect(e.pageX, e.pageY); // 觸發掉毛特效
+            }
+        });
+
+        // 狀態 1：安全模式 (貓咪背對)
+        function setSafeState() {
+            if (gameState === 'OVER') return;
+            gameState = 'SAFE';
+            catElement.src = imgSafe;
+            messageElement.textContent = "安全！盡情梳毛！";
+            messageElement.style.color = "#5cb85c";
+
+            // 設定一段隨機安全時間後，進入警戒狀態 (1.5秒 ~ 3.5秒)
+            const safeDuration = Math.random() * 2000 + 1500;
+            clearTimeout(mainTimer);
+            mainTimer = setTimeout(setWarningState, safeDuration);
+        }
+
+        // 狀態 2：警戒模式 (快被發現了)
+        function setWarningState() {
+            if (gameState === 'OVER') return;
+            gameState = 'WARNING';
+            catElement.src = imgWarning;
+            messageElement.textContent = "⚠️ 貓咪覺得怪怪的...停手！";
+            messageElement.style.color = "#f0ad4e";
+
+            // 貓咪起疑心的時間，如果這段時間內玩家沒點擊，就會轉回去 (0.8秒 ~ 1.5秒)
+            const warningDuration = Math.random() * 700 + 800;
+            clearTimeout(mainTimer);
+            mainTimer = setTimeout(setSafeState, warningDuration); // 沒事，轉回去
+        }
+
+        // 狀態 3：遊戲結束 (被抓到了)
+        function triggerGameOver() {
+            gameState = 'OVER';
+            catElement.src = imgDanger;
+            messageElement.textContent = "💥 被抓到了！請按 F5 重新開始。";
+            messageElement.style.color = "#d9534f";
+            clearTimeout(mainTimer); // 停止所有計時器
+        }
+
+        // 產生掉毛特效的函數
+        function createHairEffect(x, y) {
+            const hair = document.createElement('div');
+            hair.className = 'cat-hair';
+            
+            // 讓毛髮產生在滑鼠點擊的位置，並加上一點隨機偏移，看起來更自然
+            const offsetX = (Math.random() - 0.5) * 30;
+            const offsetY = (Math.random() - 0.5) * 30;
+            hair.style.left = (x + offsetX - 6) + 'px'; // -6 是為了讓滑鼠在毛的中心
+            hair.style.top = (y + offsetY) + 'px';
+
+            // 給毛髮一個隨機的初始旋轉角度
+            const initialRotation = Math.random() * 360;
+            hair.style.transform = `rotate(${initialRotation}deg)`;
+
+            // 將毛髮加入到網頁中
+            document.body.appendChild(hair);
+
+            // 0.8秒後 (動畫結束後) 將這個毛髮元素從網頁中刪除，避免網頁越來越卡
+            setTimeout(() => {
+                hair.remove();
+            }, 800);
+        }
+
+        // 啟動遊戲
+        // 注意：測試時如果 imgSafe 和 imgWarning 是空網址會破圖，請記得填上！
+        setSafeState();
+
+    </script>
+</body>
+</html>
