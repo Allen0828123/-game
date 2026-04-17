@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雷夢梳毛遊戲 - 精緻版</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            background-color: #fcf8f2;
+            margin: 0;
+            padding-top: 50px;
+            overflow-x: hidden;
+            user-select: none;
+        }
+        #game-container {
+            position: relative;
+            display: inline-block;
+        }
+        #game-area {
+            position: relative;
+            display: inline-block;
+            /* --- 1. 梳子游標設定 --- */
+            /* 請將下面的 URL 換成你的梳子圖片網址（建議 48x48 或 64x64 的去背 PNG） */
+            cursor: url('https://i.ibb.co/FqWNhy8K/Pngtree-comb-barbershop-flat-icon-vector-8295735.png') 32 32, auto;
+            touch-action: none; /* 防止手機瀏覽器干擾拖動 */
+        }
+        #cat-image {
+            width: 400px;
+            height: 520px;
+            object-fit: cover;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            background-color: #eee;
+            -webkit-user-drag: none; /* 防止圖片被拖出來 */
+        }
+        #score-board {
+            font-size: 80px;
+            position: absolute;
+            top: 20px;
+            left: 30px;
+            color: rgba(0,0,0,0.6);
+            font-weight: 900;
+            pointer-events: none;
+        }
+        #status-message {
+            font-size: 24px;
+            margin-top: 20px;
+            font-weight: bold;
+            height: 35px;
+            transition: all 0.3s;
+        }
+
+        /* --- 2. 掉毛特效強化 --- */
+        .cat-hair {
+            position: absolute;
+            width: 15px; /* 毛稍微大一點 */
+            height: 3px;
+            background-color: #e3b682; /* 預設金黃毛色 */
+            border-radius: 10px;
+            pointer-events: none;
+            z-index: 10;
+            animation: hair-fall 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+
+        @keyframes hair-fall {
+            0% {
+                opacity: 1;
+                transform: translate(0, 0) rotate(0deg) scale(1);
+            }
+            100% {
+                opacity: 0;
+                /* 讓毛往隨機方向噴射後掉落 */
+                transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.5);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="game-area">
+            <div id="score-board">0</div>
+            <img id="cat-image" src="" alt="貓咪">
+        </div>
+    </div>
+
+    <div id="status-message">按住滑鼠開始幫貓咪梳毛吧！</div>
+
+    <script>
+        // ================= 圖片與資源設定區 =================
+        const imgSafe = 'https://i.ibb.co/3mxmXnTR/b12fac38-1b95-444c-b293-3cf276e9ec11.jpg'; 
+        const imgWarning = 'https://i.ibb.co/pB2TPMqM/a970d9b8-41b7-4c90-803f-59dc75bb2e4c.jpg'; 
+        const imgDanger = 'https://i.ibb.co/Kp43MtWj/962f807e-1d8a-48b6-9b08-926c6a7d967a.jpg'; 
+        
+        // --- 3. 貓咪叫聲音效 ---
+        // 找一個 .mp3 網址貼在這裡，例如從 Pixabay 或 OpenGameArt 找的音效
+        const meowSound = new Audio('https://www.myinstants.com/media/sounds/meow_2.mp3'); 
+        // ==================================================
+
+        let score = 0;
+        let gameState = 'SAFE';
+        let mainTimer;
+        let isDragging = false;
+        let lastHairTime = 0;
+
+        const catElement = document.getElementById('cat-image');
+        const scoreElement = document.getElementById('score-board');
+        const messageElement = document.getElementById('status-message');
+        const gameArea = document.getElementById('game-area');
+
+        // 滑鼠按下
+        gameArea.addEventListener('mousedown', (e) => {
+            if (gameState === 'OVER') return;
+            isDragging = true;
+            handleGrooming(e);
+        });
+
+        // 滑鼠移動（拖動梳毛）
+        window.addEventListener('mousemove', (e) => {
+            if (isDragging && gameState !== 'OVER') {
+                handleGrooming(e);
+            }
+        });
+
+        // 滑鼠放開
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        function handleGrooming(e) {
+            // 檢查是否正在遊戲區域內
+            const rect = gameArea.getBoundingClientRect();
+            if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+
+            if (gameState === 'WARNING') {
+                triggerGameOver();
+                return;
+            }
+
+            if (gameState === 'SAFE') {
+                // 每移動一點點距離才加分，避免分數飆太快
+                score += 0.1; 
+                scoreElement.textContent = Math.floor(score);
+                
+                // 增加掉毛頻率：控制每隔 50ms 產生一次特效
+                const now = Date.now();
+                if (now - lastHairTime > 50) {
+                    // 一次噴出 3 根毛，增加視覺明顯度
+                    for(let i=0; i<3; i++) {
+                        createHairEffect(e.pageX, e.pageY);
+                    }
+                    lastHairTime = now;
+                    
+                    // 隨機機率播放叫聲，不要一直狂叫
+                    if (Math.random() > 0.98) {
+                        meowSound.currentTime = 0;
+                        meowSound.play();
+                    }
+                }
+            }
+        }
+
+        // 掉毛特效：使用粒子系統概念
+        function createHairEffect(x, y) {
+            const hair = document.createElement('div');
+            hair.className = 'cat-hair';
+            
+            // 隨機毛色（可以讓毛看起來更有層次）
+            const colors = ['#e3b682', '#f2d2a9', '#d19a5a', '#ffffff'];
+            hair.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+
+            // 設定 CSS 變數供動畫使用
+            const dx = (Math.random() - 0.5) * 150 + 'px'; // 左右噴射距離
+            const dy = (Math.random() * 100 + 100) + 'px'; // 向下掉落距離
+            const rot = (Math.random() * 720 - 360) + 'deg'; // 旋轉角度
+            
+            hair.style.setProperty('--dx', dx);
+            hair.style.setProperty('--dy', dy);
+            hair.style.setProperty('--rot', rot);
+
+            hair.style.left = x + 'px';
+            hair.style.top = y + 'px';
+
+            document.body.appendChild(hair);
+            setTimeout(() => hair.remove(), 1200);
+        }
+
+        // 狀態切換邏輯
+        function setSafeState() {
+            if (gameState === 'OVER') return;
+            gameState = 'SAFE';
+            catElement.src = imgSafe;
+            messageElement.textContent = "😊 貓咪很享受，繼續梳！";
+            messageElement.style.color = "#2ecc71";
+            mainTimer = setTimeout(setWarningState, Math.random() * 2000 + 2000);
+        }
+
+        function setWarningState() {
+            if (gameState === 'OVER') return;
+            gameState = 'WARNING';
+            catElement.src = imgWarning;
+            messageElement.textContent = "🤨 好像感覺到什麼了...停手！";
+            messageElement.style.color = "#f1c40f";
+            mainTimer = setTimeout(setSafeState, Math.random() * 1000 + 1000);
+        }
+
+        function triggerGameOver() {
+            gameState = 'OVER';
+            isDragging = false;
+            catElement.src = imgDanger;
+            messageElement.textContent = "😾 抓到你在偷梳毛了！遊戲結束。";
+            messageElement.style.color = "#e74c3c";
+            clearTimeout(mainTimer);
+            // 結束時可以放一個生氣的叫聲
+            meowSound.play();
+        }
+
+        setSafeState();
+    </script>
+</body>
+</html>
